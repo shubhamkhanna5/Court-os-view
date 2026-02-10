@@ -11,7 +11,10 @@ export const ScoreboardView: React.FC = () => {
   const upcomingMatches = data?.upcomingMatches || [];
   const standings = data?.standings || [];
 
-  const courtSlots = [activeMatches[0], activeMatches[1]];
+  // Strictly bind slots to Court 1 and Court 2
+  const matchC1 = activeMatches.find(m => m.court === 1);
+  const matchC2 = activeMatches.find(m => m.court === 2);
+  const courtSlots = [matchC1, matchC2];
 
   if (!data) {
      return (
@@ -57,6 +60,7 @@ export const ScoreboardView: React.FC = () => {
                                 teamB={m.team2.map(id => formatIdToName(id, data.playerNames))}
                                 scoreA={m.scoreA}
                                 scoreB={m.scoreB}
+                                status={m.status}
                             />
                         ) : (
                             <div className="h-full border border-white/5 rounded-xl bg-white/[0.02] flex flex-col items-center justify-center text-slate-600">

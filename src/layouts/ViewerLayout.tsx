@@ -35,7 +35,6 @@ const normalizeData = (rawData: any): SagaData => {
   }
 
   // 2. PARSE MATCHES & DAY STATUS
-  // Initialize as explicit arrays to ensure they are never undefined
   let activeMatches: NonNullable<SagaData['activeMatches']> = [];
   let upcomingMatches: NonNullable<SagaData['upcomingMatches']> = [];
   let isDayComplete = false;
@@ -54,50 +53,71 @@ const normalizeData = (rawData: any): SagaData => {
           }
 
           if (Array.isArray(activeDay.matches)) {
-              // Group incomplete matches by court to determine "Live" vs "Queue"
-              const incompleteMatches = activeDay.matches.filter((m: any) => !m.isCompleted);
-              const matchesByCourt: Record<number, any[]> = {};
-
-              incompleteMatches.forEach((m: any) => {
+              // 1. Filter incomplete matches
+              const incompleteMatches = activeDay.matches.filter((m: any) => !m.isCompleted && m.status !== 'completed');
+              
+              // 2. Normalize and determine Status
+              const normalizedMatches = incompleteMatches.map((m: any) => {
                   const cId = m.courtId || m.court || 0;
-                  if (!matchesByCourt[cId]) matchesByCourt[cId] = [];
-                  matchesByCourt[cId].push(m);
+                  let sA = m.scoreA;
+                  let sB = m.scoreB;
+                  // Handle string score "11-9" fallback
+                  if ((sA === undefined || sB === undefined) && typeof m.score === 'string' && m.score.includes('-')) {
+                      const parts = m.score.split('-');
+                      sA = parseInt(parts[0]) || 0;
+                      sB = parseInt(parts[1]) || 0;
+                  }
+                  sA = sA || 0;
+                  sB = sB || 0;
+
+                  // CORE LOGIC: Match is LIVE if score > 0 OR explicit status is 'live'
+                  const hasStarted = sA > 0 || sB > 0;
+                  const explicitLive = m.status === 'live';
+                  const computedStatus = (hasStarted || explicitLive) ? 'live' : 'pending';
+
+                  return {
+                      id: m.id || `match_${cId}_${m.team1}_${m.team2}`,
+                      court: parseInt(cId),
+                      team1: m.team1 || m.teamA || [],
+                      team2: m.team2 || m.teamB || [],
+                      score: m.score,
+                      scoreA: sA,
+                      scoreB: sB,
+                      round: m.round,
+                      status: computedStatus, 
+                      orderIndex: m.orderIndex ?? 999
+                  };
               });
 
-              // Process each court: Head = Live, Tail = Queue
-              Object.keys(matchesByCourt).forEach(key => {
-                  const courtMatches = matchesByCourt[parseInt(key)];
+              // 3. Group by Status
+              const liveMatches = normalizedMatches.filter((m: any) => m.status === 'live');
+              const pendingMatches = normalizedMatches.filter((m: any) => m.status === 'pending');
+
+              // Sort Pending by Order/Round
+              pendingMatches.sort((a: any, b: any) => {
+                 if (a.orderIndex !== b.orderIndex) return a.orderIndex - b.orderIndex;
+                 if (a.round !== b.round) return (a.round || 0) - (b.round || 0);
+                 return a.court - b.court;
+              });
+
+              // 4. Populate Display Lists
+              if (liveMatches.length > 0) {
+                  // Mode: LIVE
+                  activeMatches = liveMatches;
+                  upcomingMatches = pendingMatches;
+              } else {
+                  // Mode: PREVIEW (Fallback to next matches per court)
+                  // Find the next match for Court 1 and Court 2
+                  const nextC1 = pendingMatches.find((m: any) => m.court === 1);
+                  const nextC2 = pendingMatches.find((m: any) => m.court === 2);
                   
-                  courtMatches.forEach((m: any, index: number) => {
-                      let sA = m.scoreA;
-                      let sB = m.scoreB;
-                      if ((sA === undefined || sB === undefined) && typeof m.score === 'string' && m.score.includes('-')) {
-                          const parts = m.score.split('-');
-                          sA = parseInt(parts[0]) || 0;
-                          sB = parseInt(parts[1]) || 0;
-                      }
-                      sA = sA || 0;
-                      sB = sB || 0;
+                  if (nextC1) activeMatches.push(nextC1);
+                  if (nextC2) activeMatches.push(nextC2);
 
-                      const matchObj = {
-                          id: m.id || `match_${m.courtId}_${Date.now()}_${Math.random()}`,
-                          court: parseInt(key),
-                          team1: m.team1 || m.teamA || [],
-                          team2: m.team2 || m.teamB || [],
-                          score: m.score,
-                          scoreA: sA,
-                          scoreB: sB,
-                          round: m.round
-                      };
-
-                      // BROADCAST RULE: First match is ALWAYS Live (even if 0-0). Rest are Queue.
-                      if (index === 0) {
-                          activeMatches.push(matchObj);
-                      } else {
-                          upcomingMatches.push(matchObj);
-                      }
-                  });
-              });
+                  // Filter out the ones promoted to active from upcoming list
+                  const activeIds = new Set(activeMatches.map((m: any) => m.id));
+                  upcomingMatches = pendingMatches.filter((m: any) => !activeIds.has(m.id));
+              }
           }
       } else {
         if (days.length > 0 && days[days.length - 1].status === 'completed') {
@@ -106,13 +126,10 @@ const normalizeData = (rawData: any): SagaData => {
       }
   } 
   
-  // Sort Active Matches by Court ID
+  // Final Sort of Active Matches by Court ID for consistent display
   activeMatches.sort((a, b) => (a.court || 0) - (b.court || 0));
-  // Sort Upcoming Matches by Round, then Court
-  upcomingMatches.sort((a, b) => {
-     if (a.round !== b.round) return (a.round || 0) - (b.round || 0);
-     return (a.court || 0) - (b.court || 0);
-  });
+  
+  // Upcoming matches are already sorted by priority in step 3
 
   // 3. RECALCULATE STANDINGS (SAGA POINTS: 3/1/0)
   const calculatedStats: Record<string, {
@@ -181,12 +198,12 @@ const normalizeData = (rawData: any): SagaData => {
       isEligible: true
   }));
 
-  // Sort: Points -> Wins -> PPG -> Played
+  // Sort: Points -> Wins -> Losses (asc) -> PPG
   standings.sort((a, b) => {
       if (b.points !== a.points) return b.points - a.points;
       if (b.wins !== a.wins) return b.wins - a.wins;
-      if (b.ppg !== a.ppg) return b.ppg - a.ppg;
-      return b.played - a.played;
+      if (a.losses !== b.losses) return a.losses - b.losses; // Fewer losses is better
+      return b.ppg - a.ppg;
   });
 
   if (standings.length === 0 && Array.isArray(rawData.standings) && rawData.standings.length > 0) {

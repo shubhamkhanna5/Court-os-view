@@ -24,6 +24,7 @@ export interface SagaData {
     score?: string;
     scoreA?: number;
     scoreB?: number;
+    status?: 'live' | 'pending'; // Explicit status for UI (Red vs Grey badge)
   }>;
   upcomingMatches?: Array<{ // Matches scheduled but not started (0-0)
     id: string;
@@ -80,9 +81,9 @@ export const ViewerProvider: React.FC<ViewerProviderProps> = ({
       data, 
       setData, 
       lastUpdated, 
-      setLastUpdated,
-      isOnline,
-      setIsOnline
+      setLastUpdated, 
+      isOnline, 
+      setIsOnline 
     }}>
       {children}
     </ViewerContext.Provider>

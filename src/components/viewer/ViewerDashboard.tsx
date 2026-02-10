@@ -131,18 +131,31 @@ const CourtQueuePanel: React.FC<{
 }> = ({ matches, playerNames, courtId }) => {
     // Filter matches specifically for this court
     const courtQueue = (matches || []).filter(m => m.court === courtId).slice(0, 3);
+    const [isExpanded, setIsExpanded] = useState(true);
 
     return (
-        <div className="flex-1 bg-[#161b22] border border-slate-800 rounded-xl overflow-hidden shadow-lg flex flex-col h-full min-h-[150px]">
-            <div className="bg-white/5 border-b border-white/5 p-3 flex items-center gap-2 shrink-0">
-                 <div className="w-1.5 h-1.5 rounded-full bg-slate-500"></div>
-                 <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Court {courtId} Queue</h3>
-            </div>
-            <div className="overflow-y-auto no-scrollbar flex-1 flex flex-col">
+        <div className="flex-1 bg-[#161b22] border border-slate-800 rounded-xl overflow-hidden shadow-lg flex flex-col h-full min-h-[60px] transition-all duration-300">
+            <button 
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="bg-white/5 border-b border-white/5 p-3 flex items-center justify-between gap-2 shrink-0 w-full hover:bg-white/10 transition-colors"
+            >
+                 <div className="flex items-center gap-2">
+                     <div className="w-1.5 h-1.5 rounded-full bg-slate-500"></div>
+                     <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Up Next (Court {courtId})</h3>
+                 </div>
+                 <div className="md:hidden text-slate-500">
+                    {isExpanded ? '▼' : '▲'}
+                 </div>
+            </button>
+            
+            <div className={`
+                overflow-y-auto no-scrollbar flex-1 flex flex-col bg-[#0e1116] transition-all duration-300
+                ${isExpanded ? 'opacity-100 max-h-[500px]' : 'opacity-0 max-h-0 md:opacity-100 md:max-h-[500px]'}
+            `}>
                 {courtQueue.map((m, i) => (
-                    <div key={i} className="p-4 border-b border-slate-800/50 last:border-0 hover:bg-white/5 transition-colors flex items-center justify-between">
+                    <div key={i} className="p-3 border-b border-slate-800/50 last:border-0 hover:bg-white/5 transition-colors flex items-center justify-between">
                          <div className="flex items-center gap-3 w-full">
-                             <span className="text-[10px] font-mono text-slate-600 font-bold">#{i + 1}</span>
+                             <span className="text-[10px] font-mono text-slate-600 font-bold w-4">#{i + 1}</span>
                              <div className="flex-1 flex flex-col">
                                  <div className="text-sm font-bold text-slate-300 uppercase truncate">
                                      {m.team1.map(id => formatIdToName(id, playerNames)).join(' / ')}
@@ -156,8 +169,8 @@ const CourtQueuePanel: React.FC<{
                     </div>
                 ))}
                 {courtQueue.length === 0 && (
-                     <div className="flex-1 flex flex-col items-center justify-center text-slate-600 space-y-2 opacity-50 min-h-[80px]">
-                        <span className="text-[10px] uppercase tracking-widest">No Matches</span>
+                     <div className="flex-1 flex flex-col items-center justify-center text-slate-600 space-y-2 opacity-50 min-h-[60px] py-4">
+                        <span className="text-[10px] uppercase tracking-widest">No Matches Queued</span>
                      </div>
                 )}
             </div>
@@ -188,10 +201,13 @@ const LiveBroadcastView: React.FC<{ data: SagaData }> = ({ data }) => {
                             teamB={matchC1.team2.map(id => formatIdToName(id, data.playerNames))}
                             scoreA={matchC1.scoreA}
                             scoreB={matchC1.scoreB}
+                            status={matchC1.status}
                         />
                     ) : (
                         <div className="h-[200px] md:h-full border border-white/5 rounded-xl bg-white/[0.02] flex flex-col items-center justify-center text-slate-600">
+                             <div className="w-12 h-12 mb-4 opacity-20 bg-slate-500 rounded-full animate-pulse"></div>
                             <span className="text-xs font-bold uppercase tracking-widest opacity-50">Court 1 Standby</span>
+                            <span className="text-[9px] text-slate-700 mt-2 uppercase tracking-wider">Waiting for Match...</span>
                         </div>
                     )}
                 </div>
@@ -213,10 +229,13 @@ const LiveBroadcastView: React.FC<{ data: SagaData }> = ({ data }) => {
                             teamB={matchC2.team2.map(id => formatIdToName(id, data.playerNames))}
                             scoreA={matchC2.scoreA}
                             scoreB={matchC2.scoreB}
+                            status={matchC2.status}
                         />
                     ) : (
                         <div className="h-[200px] md:h-full border border-white/5 rounded-xl bg-white/[0.02] flex flex-col items-center justify-center text-slate-600">
+                            <div className="w-12 h-12 mb-4 opacity-20 bg-slate-500 rounded-full animate-pulse"></div>
                             <span className="text-xs font-bold uppercase tracking-widest opacity-50">Court 2 Standby</span>
+                            <span className="text-[9px] text-slate-700 mt-2 uppercase tracking-wider">Waiting for Match...</span>
                         </div>
                     )}
                 </div>
