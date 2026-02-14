@@ -5,16 +5,23 @@ import React, { createContext, useContext, ReactNode, useState } from 'react';
 export interface SagaData {
   sagaName?: string;
   day?: number;
+  activeLeague?: any; // Raw league object for precise local calculations
   standings?: Array<{
     name: string;
     ppg: number;
     played: number;
     wins: number;
-    losses?: number; // Added Losses field for W-L record
-    points?: number; 
+    losses: number; // Removed optional to be strict
+    points: number; // Removed optional to be strict
     streak?: number;
     balls?: number;
+    isPresent?: boolean; // Indicates if player is checked in for the current day
     isEligible?: boolean; // For greying out
+    // Extended Stats
+    bonusPoints?: number; // Bagels
+    clutchWins?: number; // 11-10 wins
+    noShows?: number;
+    dragonBalls?: number;
   }>;
   activeMatches?: Array<{
     id: string; // Added ID for keying animations
@@ -34,7 +41,12 @@ export interface SagaData {
     round?: number;
   }>;
   playerNames?: Record<string, string>; // Map ID -> Name
+  attendees?: string[]; // List of IDs present today
   isDayComplete?: boolean;
+  leagueStats?: {
+    totalMatches: number; // Total valid matches played in league history
+    minRequired?: number; // Minimum matches required for eligibility (60% of maxPlayed)
+  };
   lore?: {
     dragonBalls: Record<string, number>; // player -> count
   };
@@ -71,9 +83,15 @@ export const ViewerProvider: React.FC<ViewerProviderProps> = ({
   children, 
   isReadOnly = false 
 }) => {
-  const [data, setData] = useState<SagaData | null>(null);
+  const [data, setDataState] = useState<SagaData | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [isOnline, setIsOnline] = useState<boolean>(true);
+
+  // Simplified: Just update state. 
+  // All normalization and logic happens in ViewerLayout::normalizeData before reaching here.
+  const setData = (incoming: SagaData) => {
+    setDataState(incoming);
+  };
 
   return (
     <ViewerContext.Provider value={{ 

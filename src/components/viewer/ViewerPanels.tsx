@@ -19,7 +19,7 @@ export const LeaderboardPanel: React.FC<{ data: SagaData | null }> = ({ data }) 
               <th className="px-6 py-4">Rank</th>
               <th className="px-6 py-4">Player</th>
               <th className="px-6 py-4 text-right">PPG</th>
-              <th className="px-6 py-4 text-center">Status</th>
+              <th className="px-6 py-4 text-right">W-L</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-700/50">
@@ -28,7 +28,7 @@ export const LeaderboardPanel: React.FC<{ data: SagaData | null }> = ({ data }) 
                 key={player.name} 
                 className={`
                   ${idx < 3 ? 'bg-white/5' : ''} 
-                  ${!player.isEligible ? 'opacity-40 grayscale' : ''}
+                  ${(!player.isEligible || !player.isPresent) ? 'opacity-40 grayscale' : ''}
                   transition-colors hover:bg-white/10
                 `}
               >
@@ -44,7 +44,12 @@ export const LeaderboardPanel: React.FC<{ data: SagaData | null }> = ({ data }) 
                 </td>
                 <td className="px-6 py-5">
                   <div className="flex flex-col">
-                    <span className="text-2xl font-bold text-white tracking-tight">{player.name}</span>
+                    <span className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
+                        {player.name}
+                        {!player.isPresent && (
+                            <span className="px-2 py-0.5 rounded text-[10px] bg-slate-700 text-slate-400 font-bold uppercase tracking-wider">Away</span>
+                        )}
+                    </span>
                     <div className="flex gap-2 mt-1">
                       {player.streak && player.streak >= 3 ? (
                         <span className="text-xs font-bold text-orange-400 flex items-center gap-1">
@@ -57,9 +62,8 @@ export const LeaderboardPanel: React.FC<{ data: SagaData | null }> = ({ data }) 
                 <td className="px-6 py-5 text-right">
                   <span className="font-mono text-3xl font-bold text-amber-400">{player.ppg.toFixed(2)}</span>
                 </td>
-                <td className="px-6 py-5 text-center text-xl">
-                  {player.balls ? '🐉'.repeat(player.balls) : ''}
-                  {!player.isEligible && '🔒'}
+                <td className="px-6 py-5 text-right font-mono text-xl text-slate-400">
+                   {player.wins}-{player.losses}
                 </td>
               </tr>
             ))}

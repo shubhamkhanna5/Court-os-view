@@ -1,9 +1,9 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
 import { useViewerMode, SagaData } from '../../context/ViewerContext';
-import { ChampionScene, SpotlightScene, AuraType } from './ViewerScenes';
 import { LiveCourtCard } from './LiveCourtCard';
 import { formatIdToName } from '../../layouts/ViewerLayout';
+import { generateUltraSagaPdf } from '../../utils/generateUltraSagaPdf';
 
 // --- CONFIG ---
 const SPONSOR_CONFIG = {
@@ -13,14 +13,6 @@ const SPONSOR_CONFIG = {
 };
 
 const SHOW_DEBUG = true; 
-
-// --- HELPERS ---
-const getAura = (player: NonNullable<SagaData['standings']>[number], rank: number): AuraType => {
-  if (rank === 1) return 'red';               
-  if (rank <= 3) return 'gold';               
-  if ((player.streak || 0) >= 2) return 'blue'; 
-  return 'neutral';
-};
 
 // --- TICKER COMPONENT ---
 const BroadcastTicker: React.FC<{ data: SagaData; lastUpdated: Date; activeMatches: number }> = ({ data, lastUpdated, activeMatches }) => {
@@ -47,79 +39,6 @@ const BroadcastTicker: React.FC<{ data: SagaData; lastUpdated: Date; activeMatch
         {messages[index]}
       </span>
     </div>
-  );
-};
-
-// --- SCENES (Cinematic, Podium) ---
-const CinematicScene: React.FC<{ data: SagaData }> = ({ data }) => {
-  const [step, setStep] = useState(0);
-  const champ = data.standings?.[0];
-
-  useEffect(() => {
-    const s1 = setTimeout(() => setStep(1), 500);
-    const s2 = setTimeout(() => setStep(2), 4000);
-    return () => { clearTimeout(s1); clearTimeout(s2); };
-  }, []);
-
-  if (step === 0) return <div className="flex-1 bg-black animate-in fade-in duration-1000"></div>;
-  if (step === 1) {
-      return (
-          <div className="flex-1 flex flex-col items-center justify-center bg-black text-white animate-in zoom-in-95 duration-1000">
-              <h1 className="text-6xl md:text-8xl font-black tracking-widest uppercase text-center animate-pulse">
-                  DAY {data.day}<br/>COMPLETE
-              </h1>
-              <div className="h-2 w-32 bg-red-600 mt-8"></div>
-          </div>
-      );
-  }
-  if (champ) {
-      return (
-          <ChampionScene 
-            player={champ}
-            sagaName={data.sagaName || ''}
-            aura="red"
-            sponsor="DAY COMPLETE · FINAL STANDINGS"
-          />
-      );
-  }
-  return null;
-};
-
-const DayCompleteView: React.FC<{ data: SagaData }> = ({ data }) => {
-  const top3 = (data.standings || []).slice(0, 3);
-  return (
-      <section className="flex-1 flex flex-col justify-center px-4 md:px-10 py-8 relative animate-in fade-in duration-1000 overflow-y-auto">
-        <div className="flex items-center gap-4 mb-8 opacity-40">
-            <div className="h-px bg-slate-800 flex-1"></div>
-            <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Final Standings · Day {data.day}</h2>
-            <div className="h-px bg-slate-800 flex-1"></div>
-        </div>
-        {top3.length > 0 && (
-          <div className="flex flex-col md:grid md:grid-cols-3 gap-8 items-end">
-             {top3[1] && (
-              <div className="order-2 md:order-1 w-full bg-[#161b22] border border-slate-800 rounded-xl p-8 text-center transform md:translate-y-4 shadow-lg opacity-80">
-                 <div className="text-4xl mb-4 grayscale opacity-50">🥈</div>
-                 <div className="text-2xl font-black text-slate-300 uppercase truncate">{top3[1].name}</div>
-                 <div className="text-4xl font-mono font-bold text-slate-200 mt-2">{top3[1].points} <span className="text-sm font-sans text-slate-500 uppercase">PTS</span></div>
-              </div>
-            )}
-            {top3[0] && (
-              <div className="order-1 md:order-2 w-full bg-gradient-to-b from-[#1c1f26] to-[#0f1115] border border-yellow-500/20 rounded-xl p-10 text-center relative shadow-[0_0_50px_rgba(0,0,0,0.5)] z-10 ring-1 ring-white/5 transform scale-105">
-                 <div className="text-6xl mb-4 drop-shadow-xl mt-4">👑</div>
-                 <div className="text-5xl font-black text-white uppercase truncate">{top3[0].name}</div>
-                 <div className="text-7xl font-mono font-bold text-yellow-500 mt-3">{top3[0].points} <span className="text-2xl font-sans text-yellow-700 uppercase">PTS</span></div>
-              </div>
-            )}
-            {top3[2] && (
-              <div className="order-3 md:order-3 w-full bg-[#161b22] border border-slate-800 rounded-xl p-8 text-center transform md:translate-y-4 shadow-lg opacity-80">
-                 <div className="text-4xl mb-4 grayscale opacity-40">🥉</div>
-                 <div className="text-2xl font-black text-slate-300 uppercase truncate">{top3[2].name}</div>
-                 <div className="text-4xl font-mono font-bold text-slate-200 mt-2">{top3[2].points} <span className="text-sm font-sans text-slate-500 uppercase">PTS</span></div>
-              </div>
-            )}
-          </div>
-        )}
-      </section>
   );
 };
 
@@ -281,18 +200,38 @@ export const OverviewScene: React.FC<{ data: SagaData; lastUpdated: Date; isOnli
       </header>
 
       {/* 2. DYNAMIC CONTENT AREA */}
-      {/* Mobile needs to allow scrolling if content overflows */}
+      {/* Always show Live Broadcast View, even if day is complete (shows Court Standby) */}
       <div className="flex-1 min-h-0 relative">
-          {data.isDayComplete ? (
-              <DayCompleteView data={data} />
-          ) : (
-              <LiveBroadcastView data={data} />
-          )}
+          <LiveBroadcastView data={data} />
       </div>
 
       {/* 3. FOOTER */}
-      <footer className="bg-black py-2 border-t border-slate-900 h-8 relative overflow-hidden z-40 shrink-0">
+      <footer className="bg-black py-2 border-t border-slate-900 h-8 relative overflow-hidden z-40 shrink-0 flex justify-between items-center px-4">
         <BroadcastTicker data={data} lastUpdated={lastUpdated} activeMatches={data.activeMatches?.length || 0} />
+        
+        {/* Report Button (Hidden on Mobile usually, but discreetly placed here) */}
+        <button 
+           onClick={() => generateUltraSagaPdf(
+            data.sagaName || "Saga",
+            (data.standings || []).map(s => ({
+                name: s.name,
+                ppg: s.ppg,
+                wins: s.wins,
+                losses: s.losses,
+                points: s.points,
+                played: s.played,
+                isEligible: s.isEligible,
+                bonusPoints: s.bonusPoints,
+                clutchWins: s.clutchWins,
+                noShows: s.noShows,
+                dragonBalls: s.dragonBalls
+            })),
+            data.leagueStats
+           )}
+           className="absolute right-2 top-1/2 -translate-y-1/2 bg-white/5 hover:bg-white/20 text-slate-500 hover:text-white px-2 py-0.5 rounded text-[8px] uppercase font-bold tracking-widest transition-all z-50"
+        >
+           Export PDF
+        </button>
       </footer>
 
       {/* 4. DEBUG */}

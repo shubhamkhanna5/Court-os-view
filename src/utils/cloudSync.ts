@@ -8,23 +8,46 @@ const isViewerUrl = () => {
 };
 
 export const cloudRestore = async (): Promise<any> => {
-  console.log('[Cloud] Restoring data (Read-Only)...');
+  // console.log('[Cloud] Restoring data (Read-Only)...');
   try {
     // Explicitly use GET with action=restore parameter
-    const response = await fetch(`${CLOUD_URL}?action=restore`);
-    const json = await response.json();
+    // Added 'ts' param to prevent browser caching
+    // Added credentials: 'omit' to prevent CORS issues with Google redirects
+    const response = await fetch(`${CLOUD_URL}?action=restore&ts=${Date.now()}`, {
+        method: 'GET',
+        credentials: 'omit',
+        redirect: 'follow', // Explicitly follow redirects
+        headers: {
+            'Accept': 'application/json'
+        }
+    });
+
+    if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const text = await response.text();
+    if (!text) return null;
+
+    let json;
+    try {
+        json = JSON.parse(text);
+    } catch (e) {
+        console.warn('[Cloud] JSON Parse failed, raw text:', text.substring(0, 50));
+        throw new Error('Invalid JSON received');
+    }
     
     // Handle standard Google Apps Script response wrapper
     if (json && json.success && json.data) {
-        console.log('[Cloud] Restore successful (Wrapped)', json.data);
+        // console.log('[Cloud] Restore successful (Wrapped)');
         return json.data;
     }
     
     // Fallback for direct data return
-    console.log('[Cloud] Restore successful (Direct)', json);
+    // console.log('[Cloud] Restore successful (Direct)');
     return json;
   } catch (error) {
-    console.error('[Cloud] Restore failed', error);
+    console.warn('[Cloud] Restore failed:', error);
     throw error;
   }
 };

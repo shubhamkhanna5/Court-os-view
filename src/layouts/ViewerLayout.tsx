@@ -3,6 +3,7 @@ import React, { useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { ViewerProvider, useViewerMode, SagaData } from '../context/ViewerContext';
 import { cloudRestore } from '../utils/cloudSync';
+import { calculateLeagueStandings } from '../utils/leagueLogic';
 import { TVDashboard } from '../components/viewer/ViewerDashboard';
 
 // Helper to format names if missing in map
@@ -22,7 +23,7 @@ const normalizeData = (rawData: any): SagaData => {
       return {};
   }
 
-  // 1. EXTRACT PLAYER MAP
+  // 1. EXTRACT PLAYER MAP (Global Registry)
   const playerNames: Record<string, string> = {};
   const sourcePlayers = rawData.players || rawData.activeLeague?.players || [];
   
@@ -34,190 +35,182 @@ const normalizeData = (rawData: any): SagaData => {
     });
   }
 
-  // 2. PARSE MATCHES & DAY STATUS
+  // 2. IDENTIFY ATTENDANCE FOR CURRENT DAY
+  const days = rawData.activeLeague?.days || [];
+  // Current day is first non-completed, or the last one if all completed
+  const activeDay = days.find((d: any) => d.status !== 'completed') || days[days.length - 1]; 
+  const attendeeSet = activeDay?.attendees ? new Set<string>(activeDay.attendees) : new Set<string>();
+
+  // 3. PARSE MATCHES (Active/Upcoming)
   let activeMatches: NonNullable<SagaData['activeMatches']> = [];
   let upcomingMatches: NonNullable<SagaData['upcomingMatches']> = [];
   let isDayComplete = false;
   
-  if (rawData.activeLeague && Array.isArray(rawData.activeLeague.days)) {
-      const days = rawData.activeLeague.days;
-      const activeDay = days.find((d: any) => d.status !== 'completed');
+  if (activeDay) {
+      const allMatchesDone = Array.isArray(activeDay.matches) && 
+                             activeDay.matches.length > 0 && 
+                             activeDay.matches.every((m: any) => m.isCompleted);
       
-      if (activeDay) {
-          const allMatchesDone = Array.isArray(activeDay.matches) && 
-                                 activeDay.matches.length > 0 && 
-                                 activeDay.matches.every((m: any) => m.isCompleted);
-          
-          if (allMatchesDone) {
-            isDayComplete = true;
-          }
-
-          if (Array.isArray(activeDay.matches)) {
-              // 1. Filter incomplete matches
-              const incompleteMatches = activeDay.matches.filter((m: any) => !m.isCompleted && m.status !== 'completed');
-              
-              // 2. Normalize and determine Status
-              const normalizedMatches = incompleteMatches.map((m: any) => {
-                  const cId = m.courtId || m.court || 0;
-                  let sA = m.scoreA;
-                  let sB = m.scoreB;
-                  // Handle string score "11-9" fallback
-                  if ((sA === undefined || sB === undefined) && typeof m.score === 'string' && m.score.includes('-')) {
-                      const parts = m.score.split('-');
-                      sA = parseInt(parts[0]) || 0;
-                      sB = parseInt(parts[1]) || 0;
-                  }
-                  sA = sA || 0;
-                  sB = sB || 0;
-
-                  // CORE LOGIC: Match is LIVE if score > 0 OR explicit status is 'live'
-                  const hasStarted = sA > 0 || sB > 0;
-                  const explicitLive = m.status === 'live';
-                  const computedStatus = (hasStarted || explicitLive) ? 'live' : 'pending';
-
-                  return {
-                      id: m.id || `match_${cId}_${m.team1}_${m.team2}`,
-                      court: parseInt(cId),
-                      team1: m.team1 || m.teamA || [],
-                      team2: m.team2 || m.teamB || [],
-                      score: m.score,
-                      scoreA: sA,
-                      scoreB: sB,
-                      round: m.round,
-                      status: computedStatus, 
-                      orderIndex: m.orderIndex ?? 999
-                  };
-              });
-
-              // 3. Group by Status
-              const liveMatches = normalizedMatches.filter((m: any) => m.status === 'live');
-              const pendingMatches = normalizedMatches.filter((m: any) => m.status === 'pending');
-
-              // Sort Pending by Order/Round
-              pendingMatches.sort((a: any, b: any) => {
-                 if (a.orderIndex !== b.orderIndex) return a.orderIndex - b.orderIndex;
-                 if (a.round !== b.round) return (a.round || 0) - (b.round || 0);
-                 return a.court - b.court;
-              });
-
-              // 4. Populate Display Lists
-              if (liveMatches.length > 0) {
-                  // Mode: LIVE
-                  activeMatches = liveMatches;
-                  upcomingMatches = pendingMatches;
-              } else {
-                  // Mode: PREVIEW (Fallback to next matches per court)
-                  // Find the next match for Court 1 and Court 2
-                  const nextC1 = pendingMatches.find((m: any) => m.court === 1);
-                  const nextC2 = pendingMatches.find((m: any) => m.court === 2);
-                  
-                  if (nextC1) activeMatches.push(nextC1);
-                  if (nextC2) activeMatches.push(nextC2);
-
-                  // Filter out the ones promoted to active from upcoming list
-                  const activeIds = new Set(activeMatches.map((m: any) => m.id));
-                  upcomingMatches = pendingMatches.filter((m: any) => !activeIds.has(m.id));
-              }
-          }
-      } else {
-        if (days.length > 0 && days[days.length - 1].status === 'completed') {
-           isDayComplete = true;
-        }
+      if (allMatchesDone) {
+        isDayComplete = true;
       }
-  } 
-  
-  // Final Sort of Active Matches by Court ID for consistent display
-  activeMatches.sort((a, b) => (a.court || 0) - (b.court || 0));
-  
-  // Upcoming matches are already sorted by priority in step 3
 
-  // 3. RECALCULATE STANDINGS (SAGA POINTS: 3/1/0)
-  const calculatedStats: Record<string, {
-      name: string;
-      wins: number;
-      played: number;
-      totalScore: number;
-      points: number; 
-  }> = {};
-
-  Object.entries(playerNames).forEach(([id, name]) => {
-      calculatedStats[id] = { name, wins: 0, played: 0, totalScore: 0, points: 0 };
-  });
-
-  const leagueDays = rawData.activeLeague?.days || [];
-  leagueDays.forEach((day: any) => {
-      const matches = day.matches || [];
-      matches.forEach((m: any) => {
-          if (m.isCompleted) {
-              const t1 = m.team1 || m.teamA || [];
-              const t2 = m.team2 || m.teamB || [];
-              
+      if (Array.isArray(activeDay.matches)) {
+          // Filter incomplete matches
+          const incompleteMatches = activeDay.matches.filter((m: any) => !m.isCompleted && m.status !== 'completed' && m.status !== 'walkover');
+          
+          // Normalize and determine Status
+          const normalizedMatches = incompleteMatches.map((m: any) => {
+              const cId = m.courtId || m.court || 0;
               let sA = m.scoreA;
               let sB = m.scoreB;
-              if (sA === undefined && typeof m.score === 'string') {
-                   const p = m.score.split('-');
-                   sA = parseInt(p[0]);
-                   sB = parseInt(p[1]);
+              // Handle string score "11-9" fallback
+              if ((sA === undefined || sB === undefined) && typeof m.score === 'string' && m.score.includes('-')) {
+                  const parts = m.score.split('-');
+                  sA = parseInt(parts[0]) || 0;
+                  sB = parseInt(parts[1]) || 0;
               }
               sA = sA || 0;
               sB = sB || 0;
 
-              const updatePlayer = (ids: string[], isWinner: boolean, score: number) => {
-                  ids.forEach(id => {
-                      if (calculatedStats[id]) {
-                          calculatedStats[id].played++;
-                          calculatedStats[id].totalScore += score;
-                          if (isWinner) {
-                              calculatedStats[id].wins++;
-                              calculatedStats[id].points += 3; // WIN = 3 PTS
-                          } else {
-                              calculatedStats[id].points += 1; // LOSS = 1 PT
-                          }
-                      }
-                  });
+              // CORE LOGIC: Match is LIVE if score > 0 OR explicit status is 'live'
+              const hasStarted = sA > 0 || sB > 0;
+              const explicitLive = m.status === 'live';
+              const computedStatus = (hasStarted || explicitLive) ? 'live' : 'pending';
+
+              return {
+                  id: m.id || `match_${cId}_${m.team1}_${m.team2}`,
+                  court: parseInt(cId),
+                  team1: m.team1 || m.teamA || [],
+                  team2: m.team2 || m.teamB || [],
+                  score: m.score,
+                  scoreA: sA,
+                  scoreB: sB,
+                  round: m.round,
+                  status: computedStatus, 
+                  orderIndex: m.orderIndex ?? 999
               };
+          });
 
-              if (sA > sB) {
-                  updatePlayer(t1, true, sA);
-                  updatePlayer(t2, false, sB);
-              } else if (sB > sA) {
-                  updatePlayer(t1, false, sA);
-                  updatePlayer(t2, true, sB);
-              }
+          // Group by Status
+          const liveMatches = normalizedMatches.filter((m: any) => m.status === 'live');
+          const pendingMatches = normalizedMatches.filter((m: any) => m.status === 'pending');
+
+          // Sort Pending by Order/Round
+          pendingMatches.sort((a: any, b: any) => {
+             if (a.orderIndex !== b.orderIndex) return a.orderIndex - b.orderIndex;
+             if (a.round !== b.round) return (a.round || 0) - (b.round || 0);
+             return a.court - b.court;
+          });
+
+          // Populate Display Lists
+          if (liveMatches.length > 0) {
+              // Mode: LIVE
+              activeMatches = liveMatches;
+              upcomingMatches = pendingMatches;
+          } else {
+              // Mode: PREVIEW (Fallback to next matches per court)
+              const nextC1 = pendingMatches.find((m: any) => m.court === 1);
+              const nextC2 = pendingMatches.find((m: any) => m.court === 2);
+              
+              if (nextC1) activeMatches.push(nextC1);
+              if (nextC2) activeMatches.push(nextC2);
+
+              const activeIds = new Set(activeMatches.map((m: any) => m.id));
+              upcomingMatches = pendingMatches.filter((m: any) => !activeIds.has(m.id));
           }
-      });
-  });
+      }
+  } else {
+    // If no active day, check if last day completed
+    if (days.length > 0 && days[days.length - 1].status === 'completed') {
+       isDayComplete = true;
+    }
+  }
+  
+  // Sort Active Matches by Court ID
+  activeMatches.sort((a, b) => (a.court || 0) - (b.court || 0));
 
-  let standings = Object.values(calculatedStats).map(stat => ({
-      name: stat.name,
-      wins: stat.wins,
-      losses: stat.played - stat.wins,
-      played: stat.played,
-      ppg: stat.played > 0 ? stat.totalScore / stat.played : 0,
-      points: stat.points,
-      isEligible: true
-  }));
+  // 4. CALCULATE STANDINGS (Using Centralized Logic)
+  let mappedStandings: SagaData['standings'] = [];
+  let leagueStats = { totalMatches: 0, minRequired: 0 };
 
-  // Sort: Points -> Wins -> Losses (asc) -> PPG
-  standings.sort((a, b) => {
-      if (b.points !== a.points) return b.points - a.points;
-      if (b.wins !== a.wins) return b.wins - a.wins;
-      if (a.losses !== b.losses) return a.losses - b.losses; // Fewer losses is better
-      return b.ppg - a.ppg;
-  });
+  if (rawData.activeLeague) {
+      // ✅ CORE: Use single source of truth for Standings Calculation
+      const pbzStandings = calculateLeagueStandings(rawData.activeLeague);
+      
+      // ✅ METADATA: Calculated locally since it's UI/Report-only metadata not in core logic
+      const streaks: Record<string, number> = {};
+      const clutchWins: Record<string, number> = {};
 
-  if (standings.length === 0 && Array.isArray(rawData.standings) && rawData.standings.length > 0) {
-      standings = rawData.standings;
+      if (rawData.activeLeague.days) {
+          rawData.activeLeague.days.forEach((day: any) => {
+              if (!day.matches) return;
+              day.matches.forEach((m: any) => {
+                  if (m.isCompleted && m.status === 'completed' && !m.isForfeit && (!m.noShowPlayerIds || m.noShowPlayerIds.length === 0)) {
+                      if (m.scoreA === undefined || m.scoreB === undefined) return;
+                      const winners = m.scoreA > m.scoreB ? (m.teamA || m.team1) : (m.teamB || m.team2);
+                      const losers = m.scoreA > m.scoreB ? (m.teamB || m.team2) : (m.teamA || m.team1);
+                      
+                      // Streak Logic
+                      winners?.forEach((id: string) => { streaks[id] = (streaks[id] || 0) + 1; });
+                      losers?.forEach((id: string) => { streaks[id] = 0; });
+
+                      // Clutch Logic (Destructo Disc) - 1 point diff, winner >= 10
+                      const diff = Math.abs(m.scoreA - m.scoreB);
+                      const maxScore = Math.max(m.scoreA, m.scoreB);
+                      if (diff === 1 && maxScore >= 10) {
+                         winners?.forEach((id: string) => { clutchWins[id] = (clutchWins[id] || 0) + 1; });
+                      }
+                  }
+              });
+          });
+      }
+
+      const dragonBallMap = rawData.lore?.dragonBalls || {};
+
+      // ✅ MAPPING: Strict mapping from PBZ Standings -> Viewer Shape
+      mappedStandings = pbzStandings.map(s => ({
+          name: playerNames[s.playerId] || s.playerId,
+          ppg: s.ppg,
+          played: s.gamesPlayed,
+          wins: s.wins,
+          losses: s.losses,
+          points: s.points,
+          streak: streaks[s.playerId] || 0,
+          balls: 0,
+          isPresent: attendeeSet.has(s.playerId),
+          isEligible: s.eligibleForTrophies,
+          // Extended Stats for Ultra PDF
+          bonusPoints: s.bonusPoints, // Bagels
+          clutchWins: clutchWins[s.playerId] || 0,
+          noShows: s.noShows,
+          dragonBalls: dragonBallMap[s.playerId] || 0
+      }));
+
+      // Stats
+      const maxPlayed = Math.max(...pbzStandings.map(s => s.gamesPlayed), 0);
+      leagueStats.minRequired = Math.ceil(maxPlayed * 0.6);
+      
+      if (rawData.activeLeague.days) {
+          rawData.activeLeague.days.forEach((d: any) => {
+              if (d.matches) {
+                  leagueStats.totalMatches += d.matches.filter((m: any) => m.isCompleted && !m.isForfeit && (!m.noShowPlayerIds || m.noShowPlayerIds.length === 0)).length;
+              }
+          });
+      }
   }
 
   return {
     sagaName: rawData.activeLeague?.name || rawData.sagaName || rawData.name || 'PBZ Saga',
     day: rawData.activeLeague?.currentDay || rawData.day || rawData.currentDay || 1,
-    standings,
+    activeLeague: rawData.activeLeague,
+    standings: mappedStandings,
     activeMatches,
     upcomingMatches, 
     playerNames,
+    attendees: Array.from(attendeeSet),
     isDayComplete,
+    leagueStats,
     lore: rawData.lore || { dragonBalls: {} }
   };
 };

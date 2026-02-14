@@ -3,13 +3,29 @@ import React from 'react';
 import { useViewerMode } from '../../context/ViewerContext';
 import { LiveCourtCard } from './LiveCourtCard';
 import { formatIdToName } from '../../layouts/ViewerLayout';
+import { generateUltraSagaPdf } from '../../utils/generateUltraSagaPdf';
 
 export const ScoreboardView: React.FC = () => {
   const { data, lastUpdated, isOnline } = useViewerMode();
 
   const activeMatches = data?.activeMatches || [];
   const upcomingMatches = data?.upcomingMatches || [];
-  const standings = data?.standings || [];
+  
+  // CONSUME CENTRALIZED STANDINGS AND ENFORCE PPG SORT
+  // Calculated in ViewerContext via setData -> calculateLeagueStandings, but we re-sort to be 100% sure
+  const standings = [...(data?.standings || [])].sort((a, b) => {
+      // 1. PPG (PRIMARY)
+      if (Math.abs(b.ppg - a.ppg) > 0.0001) return b.ppg - a.ppg;
+      
+      // 2. Points (tiebreaker)
+      if ((b.points || 0) !== (a.points || 0)) return (b.points || 0) - (a.points || 0);
+      
+      // 3. Wins
+      if (b.wins !== a.wins) return b.wins - a.wins;
+      
+      // 4. Games Played
+      return b.played - a.played;
+  });
 
   // Strictly bind slots to Court 1 and Court 2
   const matchC1 = activeMatches.find(m => m.court === 1);
@@ -35,7 +51,33 @@ export const ScoreboardView: React.FC = () => {
             <div className="text-yellow-500 font-bold tracking-widest text-[10px] md:text-xs uppercase">SCOREBOARD</div>
          </div>
          <div className="flex items-center gap-2 md:gap-4">
-            <span className="text-[9px] md:text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+            <button
+              onClick={() =>
+                generateUltraSagaPdf(
+                  data?.sagaName || "Saiyan Saga",
+                  // We need to map SagaData standings to the shape generateUltraSagaPdf expects (Standing)
+                  // The interface in generateUltraSagaPdf is slightly more strict about numbers
+                  (data?.standings || []).map(s => ({
+                      name: s.name,
+                      ppg: s.ppg,
+                      wins: s.wins,
+                      losses: s.losses,
+                      points: s.points,
+                      played: s.played,
+                      isEligible: s.isEligible,
+                      bonusPoints: s.bonusPoints,
+                      clutchWins: s.clutchWins,
+                      noShows: s.noShows,
+                      dragonBalls: s.dragonBalls
+                  })),
+                  data?.leagueStats
+                )
+              }
+              className="bg-yellow-500 text-black text-[10px] md:text-xs font-bold px-3 py-1 rounded shadow-lg hover:scale-105 hover:bg-yellow-400 transition flex items-center gap-2"
+            >
+              <span>🐉</span> <span className="hidden md:inline">Ultra Saga Scroll</span>
+            </button>
+            <span className="text-[9px] md:text-[10px] text-slate-500 font-bold uppercase tracking-wider hidden md:inline">
                {isOnline ? '● CONNECTED' : '○ OFFLINE'}
             </span>
             <span className="text-slate-600 font-mono text-[10px] md:text-xs">
@@ -97,31 +139,32 @@ export const ScoreboardView: React.FC = () => {
             <div className="bg-black/50 border-b border-slate-800 p-3 flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-2">
                     <span className="text-xs">🏆</span>
-                    <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Standings</h3>
+                    <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Standings (PPG)</h3>
                 </div>
             </div>
             
-            <div className="grid grid-cols-[3rem_1fr_4rem_3rem] bg-black/30 border-b border-slate-800 p-2 text-[9px] uppercase font-bold text-slate-500 tracking-wider shrink-0">
+            <div className="grid grid-cols-[3rem_1fr_4rem_4rem] bg-black/30 border-b border-slate-800 p-2 text-[9px] uppercase font-bold text-slate-500 tracking-wider shrink-0">
                  <div className="pl-2">#</div>
                  <div>Player</div>
-                 <div className="text-right">W-L</div>
-                 <div className="text-right pr-2">PTS</div>
+                 <div className="text-right">PPG</div>
+                 <div className="text-right pr-2">W-L</div>
             </div>
             
             <div className="overflow-y-auto no-scrollbar flex-1">
                  {standings.map((p, idx) => (
-                    <div key={idx} className={`grid grid-cols-[3rem_1fr_4rem_3rem] p-3 items-center border-b border-slate-800/30 hover:bg-white/5 transition-colors ${idx < 3 ? 'bg-white/[0.02]' : ''}`}>
+                    <div key={idx} className={`grid grid-cols-[3rem_1fr_4rem_4rem] p-3 items-center border-b border-slate-800/30 hover:bg-white/5 transition-colors ${idx < 3 ? 'bg-white/[0.02]' : ''} ${!p.isPresent ? 'opacity-40 grayscale' : ''} ${!p.isEligible ? 'opacity-30' : ''}`}>
                          <div className={`font-mono font-bold pl-2 ${idx === 0 ? 'text-yellow-500' : 'text-slate-600'}`}>
                              {idx + 1}
                          </div>
-                         <div className="font-bold text-slate-300 truncate text-xs pr-2">
+                         <div className="font-bold text-slate-300 truncate text-xs pr-2 flex items-center gap-2">
                              {p.name}
+                             {!p.isPresent && <span className="text-[8px] bg-slate-700 text-slate-400 px-1 rounded uppercase tracking-tighter">Away</span>}
                          </div>
-                         <div className="text-right font-mono font-bold text-slate-400 text-xs">
+                         <div className="text-right font-mono font-bold text-yellow-500 text-sm">
+                             {p.ppg.toFixed(2)}
+                         </div>
+                         <div className="text-right font-mono font-bold text-slate-400 text-xs pr-2">
                              {p.wins}-{p.losses || 0}
-                         </div>
-                         <div className="text-right font-mono font-bold text-yellow-500 text-sm pr-2">
-                             {p.points || 0}
                          </div>
                     </div>
                  ))}
