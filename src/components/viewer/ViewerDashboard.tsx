@@ -7,7 +7,7 @@ import { generateUltraSagaPdf } from '../../utils/generateUltraSagaPdf';
 
 // --- CONFIG ---
 const SPONSOR_CONFIG = {
-  arena: "DINK IT",
+  arena: "RallyO",
   broadcast: "COURT OS",
   champion: "DINK IT"
 };
@@ -21,7 +21,7 @@ const BroadcastTicker: React.FC<{ data: SagaData; lastUpdated: Date; activeMatch
   const messages = useMemo(() => [
     `LIVE MATCHES: ${activeMatches}`,
     `PLAYERS ACTIVE: ${data.standings?.length || 0}`,
-    `VENUE: ${SPONSOR_CONFIG.arena} · MOTI NAGAR`,
+    `VENUE: ${SPONSOR_CONFIG.arena} · NSP · PITAMPURA`,
     `POWERED BY COURT OS`,
     `LAST SYNC: ${lastUpdated.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second: '2-digit'})}`
   ], [data, lastUpdated, activeMatches]);

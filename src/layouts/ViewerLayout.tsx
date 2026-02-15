@@ -17,6 +17,7 @@ export const formatIdToName = (id: string, map?: Record<string, string>) => {
 };
 
 // Helper to transform raw backend state into Viewer UI shape
+// This acts as the "Builder" ensuring the Viewer always has a valid, calculated state
 const normalizeData = (rawData: any): SagaData => {
   if (!rawData) {
       console.warn('[Viewer] normalizeData received null/undefined data');
@@ -35,10 +36,23 @@ const normalizeData = (rawData: any): SagaData => {
     });
   }
 
-  // 2. IDENTIFY ATTENDANCE FOR CURRENT DAY
+  // 2. IDENTIFY ATTENDANCE FOR CURRENT DAY & DERIVE TRUTH
   const days = rawData.activeLeague?.days || [];
-  // Current day is first non-completed, or the last one if all completed
-  const activeDay = days.find((d: any) => d.status !== 'completed') || days[days.length - 1]; 
+  
+  // CORE FIX: FORCE CHRONOLOGICAL SORT & SELECT LATEST
+  // We cannot trust the array order or the 'currentDay' pointer.
+  // We MUST sort by week/day to find the true timeline.
+  const sortedDays = [...days].sort((a: any, b: any) => {
+    if ((a.week || 0) !== (b.week || 0)) return (a.week || 0) - (b.week || 0);
+    return (a.day || 0) - (b.day || 0);
+  });
+  
+  // Select the LATEST day available. This ensures that when a new day is generated,
+  // the Viewer immediately jumps to it.
+  const activeDay = sortedDays.length > 0 ? sortedDays[sortedDays.length - 1] : null;
+  
+  // FORCE SYNC: Use the day number from the identified active day.
+  const currentDayNumber = activeDay?.day || rawData.activeLeague?.currentDay || 1;
   const attendeeSet = activeDay?.attendees ? new Set<string>(activeDay.attendees) : new Set<string>();
 
   // 3. PARSE MATCHES (Active/Upcoming)
@@ -57,6 +71,8 @@ const normalizeData = (rawData: any): SagaData => {
 
       if (Array.isArray(activeDay.matches)) {
           // Filter incomplete matches
+          // NOTE: We include 'scheduled', 'pending', 'live' matches here.
+          // We EXCLUDE 'completed' unless we are debugging, but typically Viewer only shows what's left.
           const incompleteMatches = activeDay.matches.filter((m: any) => !m.isCompleted && m.status !== 'completed' && m.status !== 'walkover');
           
           // Normalize and determine Status
@@ -110,6 +126,7 @@ const normalizeData = (rawData: any): SagaData => {
               upcomingMatches = pendingMatches;
           } else {
               // Mode: PREVIEW (Fallback to next matches per court)
+              // This ensures the TV doesn't go black during a break
               const nextC1 = pendingMatches.find((m: any) => m.court === 1);
               const nextC2 = pendingMatches.find((m: any) => m.court === 2);
               
@@ -120,17 +137,14 @@ const normalizeData = (rawData: any): SagaData => {
               upcomingMatches = pendingMatches.filter((m: any) => !activeIds.has(m.id));
           }
       }
-  } else {
-    // If no active day, check if last day completed
-    if (days.length > 0 && days[days.length - 1].status === 'completed') {
-       isDayComplete = true;
-    }
   }
   
   // Sort Active Matches by Court ID
   activeMatches.sort((a, b) => (a.court || 0) - (b.court || 0));
 
-  // 4. CALCULATE STANDINGS (Using Centralized Logic)
+  // 4. CALCULATE STANDINGS (Fresh Client-Side Calculation)
+  // We strictly use calculateLeagueStandings here to ensure the "Saga PPG Law" is consistent
+  // even if the backend payload had stale or pre-calculated standings.
   let mappedStandings: SagaData['standings'] = [];
   let leagueStats = { totalMatches: 0, minRequired: 0 };
 
@@ -138,7 +152,7 @@ const normalizeData = (rawData: any): SagaData => {
       // ✅ CORE: Use single source of truth for Standings Calculation
       const pbzStandings = calculateLeagueStandings(rawData.activeLeague);
       
-      // ✅ METADATA: Calculated locally since it's UI/Report-only metadata not in core logic
+      // ✅ METADATA: Calculated locally since it's UI/Report-only metadata
       const streaks: Record<string, number> = {};
       const clutchWins: Record<string, number> = {};
 
@@ -202,7 +216,7 @@ const normalizeData = (rawData: any): SagaData => {
 
   return {
     sagaName: rawData.activeLeague?.name || rawData.sagaName || rawData.name || 'PBZ Saga',
-    day: rawData.activeLeague?.currentDay || rawData.day || rawData.currentDay || 1,
+    day: currentDayNumber, // The derived truth
     activeLeague: rawData.activeLeague,
     standings: mappedStandings,
     activeMatches,
